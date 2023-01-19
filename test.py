@@ -30,9 +30,9 @@ class CartPoleEnv(Env):
 
 # Training
 config = {
-    'n_episodes': 100,
-    'hidden_size_1': 3,
-    'hidden_size_2': 3,
+    'n_episodes': 100000,
+    'hidden_size_1': 4,
+    'hidden_size_2': 4,
     'lr': 3e-5,
     'lr_lambda': 0.9999,
     'gamma': 0.99,
@@ -44,12 +44,13 @@ config = {
     'eps_clip': 0.1,  
     'clip_vf': False,                            # Clip range
     'max_grad_norm': 0.5,
-    'batch_size': 100,                   # Update every batch_size samples
-    'minibatch_size': 25,               # Divide batch into smaller chunks
+    'batch_size': 32,                   # Update every batch_size samples
+    'minibatch_size': 8,               # Divide batch into smaller chunks
     'network_arch': 'separate',
     'reward_scaling': False,
     'show_training_progress': True,
-    'device': 'cpu'
+    'device': 'cpu',
+    'seed': 0
 }
 
 env = CartPoleEnv()
@@ -62,19 +63,18 @@ for _ in range(475):
         break
 print('Random policy rewards: %d' % (rewards))
 
-for n_episodes in [100, 1000, 10000, 100000, 400000]:
-    ppo_config = PPOConfig(**config)
-    ppo_config.n_episodes = n_episodes
-    ppo = PPO(env, ppo_config)
-    ppo.learn()
-    observation = env.reset()
-    rewards = 0
-    for _ in range(475):
-        observation, reward, done, info = env.step(ppo.act(observation))
-        rewards += reward
-        if done:
-            break
-    print('%d episode PPO rewards: %d' % (n_episodes, rewards))
+ppo_config = PPOConfig(**config)
+ppo = PPO(env, ppo_config)
+ppo.set_log('training')
+ppo.learn()
+observation = env.reset()
+rewards = 0
+for _ in range(475):
+    observation, reward, done, info = env.step(ppo.act(observation))
+    rewards += reward
+    if done:
+        break
+print('PPO rewards: %d' % (rewards))
 
 
 env.close()

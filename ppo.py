@@ -31,6 +31,7 @@ class PPOConfig:
     reward_scaling: bool
     show_training_progress: bool
     device: str
+    seed: int
 
 class PPO():
     def __init__(self, env: Env, config: PPOConfig):
@@ -40,6 +41,8 @@ class PPO():
         self.device =  torch.device(self.config.device)
         self.total_steps = 0
         self.writer = None
+
+        torch.manual_seed(self.config.seed)
 
         if self.env.is_multi_discrete: 
             if self.config.network_arch == 'shared':
@@ -62,7 +65,7 @@ class PPO():
 
             self.writer.add_text(
                 "Environment hyperparameters",
-                "|param|value|\n|---|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(self.env.config).items()])),
+                "|param|value|\n|---|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(self.config).items()])),
             )
             self.writer.add_text(
                 "Agent hyperparameters",
@@ -79,7 +82,10 @@ class PPO():
         ep_returns = np.zeros(self.config.n_episodes)
         pbar = tqdm(range(int(self.config.n_episodes)), disable=not bool(self.config.show_training_progress))
         return_factor = int(self.config.n_episodes*0.01 if self.config.n_episodes >= 100 else 1)
-        action_batch = torch.zeros((self.config.batch_size,self.env.action_shape.size)).to(self.device)
+        if self.env.is_multi_discrete:
+            action_batch = torch.zeros((self.config.batch_size,self.env.action_shape.size)).to(self.device)
+        else: 
+            action_batch = torch.zeros(self.config.batch_size).to(self.device)
         obs_batch = torch.zeros(self.config.batch_size, self.obs_dim).to(self.device)
         next_obs_batch = torch.zeros(self.config.batch_size, self.obs_dim).to(self.device)
         logprob_batch = torch.zeros(self.config.batch_size).to(self.device)
@@ -99,7 +105,6 @@ class PPO():
             done = False
             while not done:
                 action, logprob, _ = self.model.get_action(obs.to(self.device))
-
                 next_obs, reward, done, _ = self.env.step(action)
                 self.total_steps += 1
                 
@@ -153,21 +158,20 @@ class PPO():
 
         clipfracs = []
 
+
         for epoch in range(self.config.k_epochs):
             minibatches = BatchSampler(
                 SubsetRandomSampler(range(self.config.batch_size)), 
                 batch_size=self.config.minibatch_size, 
                 drop_last=False)
 
-
             for bi, minibatch in enumerate(minibatches):
                 adv_minibatch = advantages[minibatch]
                 adv_minibatch = (adv_minibatch - adv_minibatch.mean()) / (adv_minibatch.std() + 1e-8) # Adv normalisation
-
                 _, newlogprob, entropy = self.model.get_action(obs_batch[minibatch], action_batch[minibatch])
-                log_ratios = newlogprob - logprob_batch[minibatch] # KL divergence
+                log_ratios = newlogprob - logprob_batch[minibatch] # KL divergencey
                 ratios = torch.exp(log_ratios)
-                assert bi != 0 or epoch != 0 or torch.all(torch.abs(ratios - 1.0) < 2e-4), str(bi) + str(log_ratios) # newlogprob == logprob_batch in epoch 1 minibatch 1
+                assert bi != 0 or epoch != 0 or torch.all(torch.abs(ratios - 1.0) < 2e-4), 'epoch: %d mb: %d log ratios should be zeros:\n %s' % (epoch, bi, str(log_ratios)) # newlogprob == logprob_batch in epoch 1 minibatch 1
                 if -log_ratios.mean() > self.config.kl_max:
                     break
                 clipfracs.append(((ratios - 1.0).abs() > self.config.eps_clip).float().mean().item())
